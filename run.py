@@ -63,5 +63,6 @@ if __name__ == "__main__":
         args.model_name = f'stablediffusion/{args.model_name}'
 
     ld = LucidDreamer(for_gradio=False, save_dir=args.save_dir)
+    # import pdb; pdb.set_trace()
     ld.create(rgb_cond, txt_cond, neg_txt_cond, args.campath_gen, args.seed, args.diff_steps, model_name=args.model_name)
     ld.render_video(args.campath_render)

@@ -167,12 +167,14 @@ class LucidDreamer:
         return image
 
     def run(self, rgb_cond, txt_cond, neg_txt_cond, pcdgenpath, seed, diff_steps, render_camerapath, model_name=None, example_name=None):
+        import pdb; pdb.set_trace()
         gaussians = self.create(
             rgb_cond, txt_cond, neg_txt_cond, pcdgenpath, seed, diff_steps, model_name, example_name)
         gallery, depth = self.render_video(render_camerapath, example_name=example_name)
         return (gaussians, gallery, depth)
 
     def create(self, rgb_cond, txt_cond, neg_txt_cond, pcdgenpath, seed, diff_steps, model_name=None, example_name=None):
+        # import pdb; pdb.set_trace()
         if self.for_gradio:
             self.cleaner()
             self.load_model(model_name)
@@ -271,7 +273,7 @@ class LucidDreamer:
             imageio.mimwrite(depthpath, depthlist, fps=60, quality=8)
         return videopath, depthpath
 
-    def training(self, progress=gr.Progress()):
+    def training(self, progress=gr.Progress()):  # borrow from 3DGS
         if not self.scene:
             raise('Build 3D Scene First!')
         
@@ -329,13 +331,15 @@ class LucidDreamer:
     def generate_pcd(self, rgb_cond, prompt, negative_prompt, pcdgenpath, seed, diff_steps, progress=gr.Progress()):
         ## processing inputs
         generator=torch.Generator(device='cuda').manual_seed(seed)
-
+        import pdb; pdb.set_trace()
         w_in, h_in = rgb_cond.size
-        if w_in/h_in > 1.1 or h_in/w_in > 1.1: # if height and width are similar, do center crop
+        if w_in/h_in > 1.1 or h_in/w_in > 1.1: # if height and width are similar, do inpainting
             in_res = max(w_in, h_in)
             image_in, mask_in = np.zeros((in_res, in_res, 3), dtype=np.uint8), 255*np.ones((in_res, in_res, 3), dtype=np.uint8)
             image_in[int(in_res/2-h_in/2):int(in_res/2+h_in/2), int(in_res/2-w_in/2):int(in_res/2+w_in/2)] = np.array(rgb_cond)
             mask_in[int(in_res/2-h_in/2):int(in_res/2+h_in/2), int(in_res/2-w_in/2):int(in_res/2+w_in/2)] = 0
+            #注意这里是加的
+            mask_in = 255 -mask_in   #这里是有人推送的branch修改？
 
             image2 = np.array(Image.fromarray(image_in).resize((self.cam.W, self.cam.H))).astype(float) / 255.0
             mask2 = np.array(Image.fromarray(mask_in).resize((self.cam.W, self.cam.H))).astype(float) / 255.0
@@ -346,18 +350,24 @@ class LucidDreamer:
                 mask_image=mask2,
             )
 
-        else: # if there is a large gap between height and width, do inpainting
+        else: # if there is a large gap between height and width, do center crop
             if w_in > h_in:
                 image_curr = rgb_cond.crop((int(w_in/2-h_in/2), 0, int(w_in/2+h_in/2), h_in)).resize((self.cam.W, self.cam.H))
             else: # w <= h
                 image_curr = rgb_cond.crop((0, int(h_in/2-w_in/2), w_in, int(h_in/2+w_in/2))).resize((self.cam.W, self.cam.H))
 
         render_poses = get_pcdGenPoses(pcdgenpath)
-        depth_curr = self.d(image_curr)
-        center_depth = np.mean(depth_curr[h_in//2-10:h_in//2+10, w_in//2-10:w_in//2+10])
+        
+        depth_curr = self.d(image_curr)    #(512,512)
+        # print(depth_curr[h_in//2-10:h_in//2+10, w_in//2-10:w_in//2+10])  #这里是bug? center depth用成resize之前的了？
+        # center_depth = np.mean(depth_curr[h_in//2-10:h_in//2+10, w_in//2-10:w_in//2+10])
+
+        # print(depth_curr[self.cam.H//2-10:self.cam.H//2+10, self.cam.W//2-10:self.cam.W//2+10])
+        h_depth, w_depth = depth_curr.shape[0], depth_curr.shape[1]
+        center_depth = np.mean(depth_curr[h_depth//2-10:h_depth//2+10, w_depth//2-10:w_depth//2+10])
 
         ###########################################################################################################################
-        # Iterative scene generation
+        # Iterative scene generation 这里是核心
         H, W, K = self.cam.H, self.cam.W, self.cam.K
 
         x, y = np.meshgrid(np.arange(W, dtype=np.float32), np.arange(H, dtype=np.float32), indexing='xy') # pixels
@@ -380,6 +390,7 @@ class LucidDreamer:
             iterable_dream = range(1, len(render_poses))
 
         for i in iterable_dream:
+            # import pdb; pdb.set_trace()
             R, T = render_poses[i,:3,:3], render_poses[i,:3,3:4]
 
             ### Transform world to pixel
@@ -505,14 +516,14 @@ class LucidDreamer:
         }
 
         # render_poses = get_pcdGenPoses(pcdgenpath)
-        internel_render_poses = get_pcdGenPoses('hemisphere', {'center_depth': center_depth})
+        internel_render_poses = get_pcdGenPoses('hemisphere', {'center_depth': center_depth})  #原因是center depth Nan
 
         if self.for_gradio:
             progress(0, desc='[2/4] Aligning...')
             iterable_align = progress.tqdm(range(len(render_poses)), desc='[2/4] Aligning')
         else:
             iterable_align = range(len(render_poses))
-
+        # import pdb; pdb.set_trace()
         for i in iterable_align:
             for j in range(len(internel_render_poses)):
                 idx = i * len(internel_render_poses) + j
@@ -522,7 +533,7 @@ class LucidDreamer:
                 Rw2i = render_poses[i,:3,:3]
                 Tw2i = render_poses[i,:3,3:4]
                 Ri2j = internel_render_poses[j,:3,:3]
-                Ti2j = internel_render_poses[j,:3,3:4]
+                Ti2j = internel_render_poses[j,:3,3:4]  #原因是这个nan
 
                 Rw2j = np.matmul(Ri2j, Rw2i)
                 Tw2j = np.matmul(Ri2j, Tw2i) + Ti2j
@@ -533,8 +544,8 @@ class LucidDreamer:
                 Pc2w = np.concatenate((Rj2w, Tj2w), axis=1)
                 Pc2w = np.concatenate((Pc2w, np.array([[0,0,0,1]])), axis=0)
 
-                pts_coord_camj = Rw2j.dot(pts_coord_world) + Tw2j
-                pixel_coord_camj = np.matmul(K, pts_coord_camj)
+                pts_coord_camj = Rw2j.dot(pts_coord_world) + Tw2j   #Tw2j为nan
+                pixel_coord_camj = np.matmul(K, pts_coord_camj)  # pts_coord_camj为NAN
 
                 valid_idxj = np.where(np.logical_and.reduce((pixel_coord_camj[2]>0, 
                                                             pixel_coord_camj[0]/pixel_coord_camj[2]>=0, 

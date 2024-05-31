@@ -372,6 +372,7 @@ def loadCamerasFromData(traindata, white_background):
 def loadCameraPreset(traindata, presetdata):
     cam_infos = {}
     ## camera setting (for H, W and focal)
+    # import pdb; pdb.set_trace()
     fovx = traindata["camera_angle_x"] * 1.2
     W, H = traindata["frames"][0]["image"].size
     # W, H = traindata["W"], traindata["H"]

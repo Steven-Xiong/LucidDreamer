@@ -167,7 +167,7 @@ class LucidDreamer:
         return image
 
     def run(self, rgb_cond, txt_cond, neg_txt_cond, pcdgenpath, seed, diff_steps, render_camerapath, model_name=None, example_name=None):
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         gaussians = self.create(
             rgb_cond, txt_cond, neg_txt_cond, pcdgenpath, seed, diff_steps, model_name, example_name)
         gallery, depth = self.render_video(render_camerapath, example_name=example_name)
@@ -331,7 +331,7 @@ class LucidDreamer:
     def generate_pcd(self, rgb_cond, prompt, negative_prompt, pcdgenpath, seed, diff_steps, progress=gr.Progress()):
         ## processing inputs
         generator=torch.Generator(device='cuda').manual_seed(seed)
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         w_in, h_in = rgb_cond.size
         if w_in/h_in > 1.1 or h_in/w_in > 1.1: # if height and width are similar, do inpainting
             in_res = max(w_in, h_in)

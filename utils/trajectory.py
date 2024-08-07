@@ -237,7 +237,7 @@ def generate_seed_horizon():
 
 
 def generate_seed_backward():
-    movement = np.linspace(0, 5, 11)
+    movement = np.linspace(0, 1.0, 11)  # (0,5,11)
     render_poses = np.zeros((len(movement), 3, 4))
     for i in range(len(movement)):
         render_poses[i,:3,:3] = np.eye(3)
@@ -551,7 +551,7 @@ def main():
         render_poses = generate_seed_llff(5, 400, round=4, d=d)
     elif cam_path == 'headbanging':
         round=3
-        render_poses = generate_seed_headbanging_(maxdeg=15, nviews_per_round=180, round=round, fullround=0)
+        render_poses = generate_seed_headbanging(maxdeg=15, nviews_per_round=180, round=round, fullround=0)
     elif cam_path == 'headbanging_circle':
         round=2
         render_poses = generate_seed_headbanging_circle(maxdeg=5, nviews_per_round=180, round=round, fullround=0)

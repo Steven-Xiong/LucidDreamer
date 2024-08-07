@@ -47,7 +47,6 @@ from utils.depth import colorize
 from utils.lama import LaMa
 from utils.trajectory import get_camerapaths, get_pcdGenPoses
 
-
 get_kernel = lambda p: torch.ones(1, 1, p * 2 + 1, p * 2 + 1).to('cuda')
 t2np = lambda x: (x[0].permute(1, 2, 0).clamp_(0, 1) * 255.0).to(torch.uint8).detach().cpu().numpy()
 np2t = lambda x: (torch.as_tensor(x).to(torch.float32).permute(2, 0, 1) / 255.0)[None, ...].to('cuda')
@@ -365,6 +364,15 @@ class LucidDreamer:
         # print(depth_curr[self.cam.H//2-10:self.cam.H//2+10, self.cam.W//2-10:self.cam.W//2+10])
         h_depth, w_depth = depth_curr.shape[0], depth_curr.shape[1]
         center_depth = np.mean(depth_curr[h_depth//2-10:h_depth//2+10, w_depth//2-10:w_depth//2+10])
+        import pdb; pdb.set_trace()
+        os.makedirs(os.path.join(self.save_dir,'img'),exist_ok=True)
+        os.makedirs(os.path.join(self.save_dir, 'depth'),exist_ok=True)
+        
+        image_curr.save(os.path.join(self.save_dir,'img','init.jpg'))
+        depth_map_normalized = (depth_curr - np.min(depth_curr)) / (np.max(depth_curr) - np.min(depth_curr))
+        # 归一化到 [0, 255] 范围内
+        depth_image = Image.fromarray((depth_map_normalized * 255).astype(np.uint8))
+        depth_image.save(os.path.join(self.save_dir, 'depth','_init_depth.jpg'))
 
         ###########################################################################################################################
         # Iterative scene generation 这里是核心
@@ -431,12 +439,20 @@ class LucidDreamer:
             )
             depth_curr = self.d(image_curr)
 
+            # visualization:
+            os.makedirs(os.path.join(self.save_dir,'img'),exist_ok=True)
+            os.makedirs(os.path.join(self.save_dir, 'depth'),exist_ok=True)
+            image_curr.save(os.path.join(self.save_dir,'img',str(i)+'.jpg'))
+            depth_map_normalized = (depth_curr - np.min(depth_curr)) / (np.max(depth_curr) - np.min(depth_curr))
+            # 归一化到 [0, 255] 范围内
+            depth_image = Image.fromarray((depth_map_normalized * 255).astype(np.uint8))
+            depth_image.save(os.path.join(self.save_dir, 'depth',str(i)+'_depth.jpg'))
 
             ### depth optimize
             t_z2 = torch.tensor(depth_curr)
             sc = torch.ones(1).float().requires_grad_(True)
             optimizer = torch.optim.Adam(params=[sc], lr=0.001)
-
+            # import pdb; pdb.set_trace()
             for idx in range(100):
                 trans3d = torch.tensor([[sc,0,0,0], [0,sc,0,0], [0,0,sc,0], [0,0,0,1]]).requires_grad_(True)
                 coord_cam2 = torch.matmul(torch.tensor(np.linalg.inv(K)), torch.stack((torch.tensor(x)*t_z2, torch.tensor(y)*t_z2, 1*t_z2), axis=0)[:,round_coord_cam2[1], round_coord_cam2[0]].reshape(3,-1))
@@ -456,7 +472,7 @@ class LucidDreamer:
                 coord_world2_warp = torch.cat((coord_world2, torch.ones((1, border_valid_idx.shape[0]))), dim=0)
                 coord_world2_trans = torch.matmul(trans3d, coord_world2_warp)
                 coord_world2_trans = coord_world2_trans[:3] / coord_world2_trans[-1]
-
+            # import pdb; pdb.set_trace()
             trans3d = trans3d.detach().numpy()
 
             pts_coord_cam2 = np.matmul(np.linalg.inv(K), np.stack((x*depth_curr, y*depth_curr, 1*depth_curr), axis=0).reshape(3,-1))[:,np.where(1-mask2.reshape(-1))[0]]
@@ -465,7 +481,7 @@ class LucidDreamer:
             new_pts_coord_world2_warp = np.concatenate((new_pts_coord_world2, np.ones((1, new_pts_coord_world2.shape[1]))), axis=0)
             new_pts_coord_world2 = np.matmul(trans3d, new_pts_coord_world2_warp)
             new_pts_coord_world2 = new_pts_coord_world2[:3] / new_pts_coord_world2[-1]
-            new_pts_colors2 = (np.array(image_curr).reshape(-1,3).astype(np.float32)/255.)[np.where(1-mask2.reshape(-1))[0]]
+            new_pts_colors2 = (np.array(image_curr).reshape(-1,3).astype(np.float32)/255.)[np.where(1-mask2.reshape(-1))[0]]  # (115154,3)
 
             vector_camorigin_to_campixels = coord_world2_trans.detach().numpy() - camera_origin_coord_world2
             vector_camorigin_to_pcdpixels = pts_coord_world[:,valid_idx[border_valid_idx]] - camera_origin_coord_world2
@@ -480,7 +496,7 @@ class LucidDreamer:
             compensate_depth_zero = np.zeros(4)
             compensate_depth = np.concatenate((compensate_depth_correspond, compensate_depth_zero), axis=0)  # N_correspond+4
 
-            pixel_cam2_correspond = pixel_coord_cam2[:, border_valid_idx] # 2, N_correspond (xy)
+            pixel_cam2_correspond = pixel_coord_cam2[:, border_valid_idx] # 2, N_correspond (xy)  (2,738)
             pixel_cam2_zero = np.array([[0,0,W-1,W-1],[0,H-1,0,H-1]])
             pixel_cam2 = np.concatenate((pixel_cam2_correspond, pixel_cam2_zero), axis=1).transpose(1,0) # N+H, 2
 
@@ -500,30 +516,30 @@ class LucidDreamer:
             new_pts_coord_world2 = new_pts_coord_world2[:3] / new_pts_coord_world2[-1]
             new_pts_colors2 = (np.array(image_curr).reshape(-1,3).astype(np.float32)/255.)[np.where(1-mask2.reshape(-1))[0]]
 
-            pts_coord_world = np.concatenate((pts_coord_world, new_pts_coord_world2), axis=-1) ### Same with inv(c2w) * cam_coord (in homogeneous space)
-            pts_colors = np.concatenate((pts_colors, new_pts_colors2), axis=0)
+            pts_coord_world = np.concatenate((pts_coord_world, new_pts_coord_world2), axis=-1) ### Same with inv(c2w) * cam_coord (in homogeneous space) # (3, 377298)
+            pts_colors = np.concatenate((pts_colors, new_pts_colors2), axis=0) # (377298, 3)
 
         #################################################################################################
-
+        # import pdb; pdb.set_trace()
         yz_reverse = np.array([[1,0,0], [0,-1,0], [0,0,-1]])
         traindata = {
             'camera_angle_x': self.cam.fov[0],
             'W': W,
             'H': H,
-            'pcd_points': pts_coord_world,
-            'pcd_colors': pts_colors,
+            'pcd_points': pts_coord_world, # (3, 1283959)
+            'pcd_colors': pts_colors,      # (1283959, 3)
             'frames': [],
         }
 
         # render_poses = get_pcdGenPoses(pcdgenpath)
-        internel_render_poses = get_pcdGenPoses('hemisphere', {'center_depth': center_depth})  #原因是center depth Nan
+        internel_render_poses = get_pcdGenPoses('hemisphere', {'center_depth': center_depth})  #长度5，预设的各种trajectory
 
         if self.for_gradio:
             progress(0, desc='[2/4] Aligning...')
             iterable_align = progress.tqdm(range(len(render_poses)), desc='[2/4] Aligning')
         else:
-            iterable_align = range(len(render_poses))
-        # import pdb; pdb.set_trace()
+            iterable_align = range(len(render_poses)) #14
+        import pdb; pdb.set_trace()
         for i in iterable_align:
             for j in range(len(internel_render_poses)):
                 idx = i * len(internel_render_poses) + j
@@ -572,7 +588,7 @@ class LucidDreamer:
                 maskj = maximum_filter(maskj, size=(9,9), axes=(0,1))
                 imagej = maskj[...,None]*imagej + (1-maskj[...,None])*(-1)
 
-                maskj = minimum_filter((imagej.sum(-1)!=-3)*1, size=(11,11), axes=(0,1))
+                maskj = minimum_filter((imagej.sum(-1)!=-3)*1, size=(11,11), axes=(0,1))  # refine align
                 imagej = maskj[...,None]*imagej + (1-maskj[...,None])*0
 
                 traindata['frames'].append({
